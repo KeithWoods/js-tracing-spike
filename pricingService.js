@@ -13,45 +13,53 @@ app.listen(port, function () {
 });
 
 app.get('/priceOption', function (req, res) {
+
     const parentSpanContext = tracer.extract(FORMAT_HTTP_HEADERS, req.headers);
-    const span = tracer.startSpan(
+
+    const intraProcessSpan = tracer.startSpan(
         // we spit out the full operation name, which includes the service name
-        'com-app-fxo-quoting-service/PriceOption',
+        'com-app-fxo-quoting-service/PriceOption/IntraProcess',
         {
             childOf: parentSpanContext,
             tags: {[Tags.SPAN_KIND]: Tags.SPAN_KIND_RPC_SERVER}
         }
     );
+
     const notional= req.query.notional;
-    span.log({
-        'notional': notional,
-        'operation': 'com-app-fxo-quoting-service/PriceOption',
-    });
     console.log(`Sending notional to BCF ${notional}`);
 
-    getPriceFromBCF(tracer, notional, span)
-        .then( price => {
-            console.log(`Sending price to gateway ${price}`);
-            span.setTag(Tags.HTTP_STATUS_CODE, 200);
-            span.finish();
-            res.send(`Sending price, ${price}!`);
-        })
-        .catch( err => {
-            console.error(`Error ${err}`);
-            res.send(`Error ${err}!`);
-            span.setTag(Tags.ERROR, true);
-            span.setTag(Tags.HTTP_STATUS_CODE, err.statusCode || 500);
-            span.finish();
-        });
+    // emulate some processing time
+    setTimeout(() => {
+        intraProcessSpan.finish();
+        getPriceFromBCF(tracer, notional, parentSpanContext)
+            .then( price => {
+                const replyIntraProcessSpan = tracer.startSpan(
+                    'com-app-fxo-quoting-service/PriceOption/IntraProcess',
+                    {
+                        childOf: parentSpanContext,
+                    }
+                );
+                setTimeout(() => {
+                    console.log(`Sending price to gateway ${price}`);
+                    res.send(`Sending price, ${price}!`);
+                    replyIntraProcessSpan.finish();
+                }, 500);
+            })
+            .catch( err => {
+                console.error(`Error ${err}`);
+                res.send(`Error ${err}!`);
+            });
+
+    }, 2000);
 });
 
 
-function getPriceFromBCF(tracer, notional, root_span) {
+function getPriceFromBCF(tracer, notional, parentSpanContext) {
     const url = `http://localhost:8082/priceOption?notional=${notional}`;
-    const span = tracer.startSpan('com-app-compute-farm/PriceOption', {childOf: root_span.context()});
-    span.log({
+    const roundTripSpan = tracer.startSpan('com-app-compute-farm/PriceOption/RoundTrip', {childOf: parentSpanContext});
+    roundTripSpan.log({
         'notional': notional
     });
-    return http_get(tracer, url, span);
+    return http_get(tracer, url, roundTripSpan);
 }
 

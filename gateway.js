@@ -9,41 +9,58 @@ function onGatewayWebsocketReceived(notional) {
     // this first span should denote the websocket as that's where it's starting
     // given the gateway is generic the span should include the full operation name,
     // other services wouldn't do this
-    const span = tracer.startSpan(`websocket/com-app-fxo-quoting-service/PriceOption`);
-    span.setTag('notional', notional);
+    const operationSpan = tracer.startSpan(`com-app-fxo-quoting-service/PriceOption/Operation`);
+    operationSpan.setTag('notional', notional);
+
+    const intraProcessSpan = tracer.startSpan(
+        `com-app-fxo-quoting-service/PriceOption/IntraProcess`,
+        { childOf: operationSpan.context() }
+    );
+
     console.log(`Pricing FXO notional  ${notional}`);
 
     // emulate some internal processing
     setTimeout(() => {
-        requestPriceOption(notional, span)
+        intraProcessSpan.finish();
+        requestPriceOption(notional, operationSpan)
             .then( price => {
                 console.log(`Price received ${price}`);
-                span.setTag(Tags.HTTP_STATUS_CODE, 200)
-                span.log({
-                    'operation': 'websocket/com-app-fxo-quoting-service/PriceOption',
-                    'price': price
-                });
-                span.finish();
+                const replyIntraProcessSpan = tracer.startSpan(
+                    'com-app-fxo-quoting-service/PriceOption/IntraProcess',
+                    {
+                        childOf: operationSpan.context(),
+                    }
+                );
+                setTimeout(() => {
+                    console.log(`Sending price to user ${price}`);
+                    operationSpan.setTag(Tags.HTTP_STATUS_CODE, 200);
+                    operationSpan.log({
+                        'operation': 'websocket/com-app-fxo-quoting-service/PriceOption',
+                        'price': price
+                    });
+                    replyIntraProcessSpan.finish()
+                    operationSpan.finish();
+                }, 1000);
+
             })
             .catch( err => {
                 console.error(`Price Error ${err}`);
-                span.setTag(Tags.ERROR, true);
-                span.setTag(Tags.HTTP_STATUS_CODE, err.statusCode || 500);
-                span.finish();
+                operationSpan.setTag(Tags.ERROR, true);
+                operationSpan.setTag(Tags.HTTP_STATUS_CODE, err.statusCode || 500);
+                operationSpan.finish();
             });
     }, 1000);
 }
 
-function requestPriceOption(notional, root_span) {
+function requestPriceOption(notional, operationSpan) {
     const url = `http://localhost:8081/priceOption?notional=${notional}`;
-    // when making a call, the full trace operation name is used (service type + messaging operation name)
-    const span = tracer.startSpan(`com-app-fxo-quoting-service/PriceOption`, {childOf: root_span.context()});
-    span.log({
+    const roundTripSpan = tracer.startSpan(`com-app-fxo-quoting-service/PriceOption/RoundTrip`, {childOf: operationSpan.context()});
+    roundTripSpan.log({
         'topic' : 'com-app-fxo-quoting-service-inbox',
         'event': 'PriceOption',
         'notional': notional
     });
-    return http_get(tracer, url, span);
+    return http_get(tracer, url, roundTripSpan);
 }  
 
 assert.ok(process.argv.length == 3, 'expecting one argument');

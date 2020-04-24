@@ -15,7 +15,7 @@ app.listen(port, function () {
 
 app.get('/priceOption', function (req, res) {
     const parentSpanContext = tracer.extract(FORMAT_HTTP_HEADERS, req.headers);
-    const span1 = tracer.startSpan('com-app-compute-farm/pricing-option-internal-1', {
+    const span1 = tracer.startSpan('com-app-compute-farm/setup//IntraProcess', {
         childOf: parentSpanContext,
         tags: {[Tags.SPAN_KIND]: Tags.SPAN_KIND_RPC_SERVER}
     });
@@ -30,7 +30,7 @@ app.get('/priceOption', function (req, res) {
         span1.finish();
 
         const span2 = tracer.startSpan(
-            'com-app-compute-farm/pricing-option-internal-2',
+            'com-app-compute-farm/somePricing/IntraProcess',
             {
                 childOf: parentSpanContext, // note related to parent not span1
             }

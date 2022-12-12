@@ -4,7 +4,7 @@
   "main": "spike/index.js",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.17.1",
+    "express": "^4.17.3",
     "jaeger-client": "^3.18.0",
     "opentracing": "^0.14.4",
     "prom-client": "^12.0.0",
